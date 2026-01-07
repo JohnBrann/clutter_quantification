@@ -1,4 +1,4 @@
-# Towards Quantification of Cluttered in Robotic Grasping Scenes
+# Towards Quantification of Clutter in Robotic Grasping Scenes
 
 Below are the ordered instructions on how to generate scenes and there corresponding ground truth segmentation masks that we use to evaluate each scene. 
 
@@ -53,3 +53,21 @@ python3 scripts/occlusion_visualization_ui.py --csv <path_to_csv_produced above>
 ```
 
 <!-- ![Demo](assets/visualization_ui.gif) -->
+
+### Distance Evaluation
+We have also began exploring some distance evaluation metrics from these segmentation masks. Objects that are closer together are generally harder to grasp we assume these scenes would be more cluttered compared to scenes with objects more spread apart.
+
+Run the script to draw connection points from objects in each viewpoint
+```
+python3 ./scripts/calculate_distance.py --input-dir <path_to_scene_images>  --out-dir <out_dir> --occlusion-csv <path_to_per_object_occlusion_csv>    --colors-csv <path_to_per_object_color_csv>    --occlusion-threshold 50.0
+```
+
+This is an example resulting image from a single viewpoint. Notice we filter out objects that are above a certain occlusion threshold, We did this to make clearer connections between objects. We also believe objects above a certain occlusion threshold are ungraspable and the inclusion of them is not valuable. We are still exploring this metric and how we want to quantify it. 
+
+![Demo](assets/example_distance.png)
+
+Run the script below for the interactive UI shown at the beginning of README showing occlusion scores from different viewpoints that also includes the distance images. 
+```
+python3 ./scripts/occlusion_and_distance_visualization_ui.py --scene-dir <path_to_scene_images> --out-dir <out_dir> --occlusion-csv <path_to_per_object_occlusion_csv> --distances-dir <path_to_distances_dir> --connections-summary-csv <path_to_distance_summary_csv>
+```
+![Demo](assets/visualization_ui_2.gif)

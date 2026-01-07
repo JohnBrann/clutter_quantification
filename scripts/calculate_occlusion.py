@@ -8,6 +8,7 @@ from collections import defaultdict
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 def parse_args():
     p = argparse.ArgumentParser(description="Multi-view occlusion report using SCENE images as overlay (+ CSV).")
@@ -15,7 +16,7 @@ def parse_args():
     p.add_argument("--threshold", type=int, default=0, help="RGB threshold [0..255]: pixel is object if any channel > threshold.")
     p.add_argument("--out-dir", type=str, default="scene_occlusion_out", help="Where to write per-viewpoint report figures and CSV.")
     p.add_argument("--dpi", type=int, default=140, help="Figure DPI.")
-    p.add_argument("--max-cols", type=int, default=6, help="Max columns before wrapping rows.")
+    p.add_argument("--max_cols", type=int, default=6, help="Max columns before wrapping rows.")
     return p.parse_args()
 
 
@@ -86,6 +87,35 @@ def compute_occlusion_masks(masks):
         above_cover |= m
     return occluded
 
+def representative_color_of_image(rgb: np.ndarray, background_threshold=0):
+    """
+    Determine a deterministic representative RGB color for a colored object image.
+    - rgb: HxWx3 uint8 array
+    - background_threshold: any pixel with all channels <= threshold is treated as background.
+    Returns an (r,g,b) tuple of ints. If no object pixels found returns (0,0,0).
+    """
+    flat = rgb.reshape(-1, 3)
+    if background_threshold > 0:
+        mask = (flat > background_threshold).any(axis=1)
+    else:
+        # treat pure black as background
+        mask = np.any(flat != 0, axis=1)
+
+    pixels = flat[mask]
+    if pixels.size == 0:
+        return (0, 0, 0)
+
+    # encode colors to single ints then choose the most common (deterministic)
+    codes = (pixels[:,0].astype(np.uint32) << 16) | (pixels[:,1].astype(np.uint32) << 8) | pixels[:,2].astype(np.uint32)
+    # use numpy unique with return_counts for speed and determinism
+    vals, counts = np.unique(codes, return_counts=True)
+    mode_code = int(vals[np.argmax(counts)])
+    r = (mode_code >> 16) & 0xFF
+    g = (mode_code >> 8) & 0xFF
+    b = mode_code & 0xFF
+    return (int(r), int(g), int(b))
+
+
 # ----------------------
 # Reporting (per-view)
 # ----------------------
@@ -141,106 +171,6 @@ def make_report_figure(rgb_images, filenames, occlusion_pct, scene_overlay_rgb,
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
-# ----------------------
-# Main (multi-view)
-# ----------------------
-
-# def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_cols):
-#     """
-#     Process a single viewpoint:
-#       - obj_list is [(obj_id, path), ...] in bottom->top order
-#       - scene_path is the ground-truth scene image to show as overlay
-#       - returns (per_object_pcts, per_view_average, per_view_std, num_objects, figure_path, per_object_rows, view_row)
-#     """
-#     files = [p for _, p in obj_list]
-
-#     # Load RGB & masks for objects
-#     rgb_images, masks = [], []
-#     for fp in files:
-#         rgb, m = load_rgb_and_mask(fp, threshold=threshold)
-#         rgb_images.append(rgb)
-#         masks.append(m)
-
-#     # Consistency check (objects)
-#     H, W, _ = rgb_images[0].shape
-#     for i, (rgb, m) in enumerate(zip(rgb_images, masks)):
-#         if rgb.shape != (H, W, 3) or m.shape != (H, W):
-#             raise ValueError(f"All images in view {view_key} must be same size. "
-#                              f"{files[i]} has {rgb.shape}, mask {m.shape}, expected {(H, W, 3)}")
-
-#     # Load scene overlay
-#     scene_img = Image.open(scene_path).convert("RGB")
-#     scene_rgb = np.asarray(scene_img, dtype=np.uint8)
-#     if scene_rgb.shape != (H, W, 3):
-#         raise ValueError(
-#             f"Scene image size mismatch for view {view_key}. "
-#             f"Scene {os.path.basename(scene_path)} has {scene_rgb.shape}, expected {(H, W, 3)}"
-#         )
-
-#     # Occlusion computation
-#     occ_masks = compute_occlusion_masks(masks)
-#     occlusion_pct = []
-#     for m, occ in zip(masks, occ_masks):
-#         total = int(m.sum())
-#         occluded = int(occ.sum())
-#         pct = (occluded / total * 100.0) if total > 0 else 0.0
-#         occlusion_pct.append(pct)
-
-#     # compute per-view std
-#     view_avg = float(np.mean(occlusion_pct)) if occlusion_pct else 0.0
-#     view_std = float(np.std(occlusion_pct)) if occlusion_pct else 0.0
-
-#     # Output figure path
-#     th, ph = view_key
-#     out_name = f"theta{th}_phi{ph}_occlusion.png"
-#     fig_path = os.path.join(out_dir, out_name)
-
-#     # Report figure (overlay = SCENE)
-#     make_report_figure(
-#         rgb_images=rgb_images,
-#         filenames=files,
-#         occlusion_pct=occlusion_pct,
-#         scene_overlay_rgb=scene_rgb,
-#         out_path=fig_path,
-#         dpi=dpi,
-#         max_cols=max_cols
-#     )
-
-#     # Per-view summary
-#     print(f"[view theta{th}_phi{ph}] Saved report: {fig_path}")
-#     per_object_rows = []
-#     for i, (fp, pct) in enumerate(zip(files, occlusion_pct), start=1):
-#         base = os.path.basename(fp)
-#         m = OBJ_RE.match(base)
-#         obj_id = int(m.group(3)) if m else None
-#         print(f"  [{i:02d}] {base}  occlusion={pct:6.2f}%")
-#         per_object_rows.append({
-#             "level": "object",
-#             "theta": int(th),
-#             "phi": int(ph),
-#             "obj_id": obj_id,
-#             "filename": base,
-#             "occlusion_pct": round(pct, 6),
-#             "view_avg_pct": round(view_avg, 6),
-#             "view_std_pct": round(view_std, 6),
-#             "figure_path": fig_path
-#         })
-#     print(f"  View average occlusion: {view_avg:.2f}%  std: {view_std:.2f}%\n")
-
-#     view_row = {
-#         "level": "view",
-#         "theta": int(th),
-#         "phi": int(ph),
-#         "obj_id": "",
-#         "filename": "",
-#         "occlusion_pct": "",
-#         "view_avg_pct": round(view_avg, 6),
-#         "view_std_pct": round(view_std, 6),
-#         "figure_path": fig_path
-#     }
-
-#     return occlusion_pct, view_avg, view_std, len(occlusion_pct), fig_path, per_object_rows, view_row
-
 def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_cols):
     """
     Process a single viewpoint:
@@ -273,11 +203,6 @@ def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_co
             f"Scene {os.path.basename(scene_path)} has {scene_rgb.shape}, expected {(H, W, 3)}"
         )
 
-    # -------------------------
-    # Robust occlusion: compare each object's solo mask to the SCENE overlay by color.
-    # This is order-independent and relies on each object image being colored with
-    # a unique UID color (as your pipeline already does).
-    # -------------------------
     # Determine a representative RGB color for each object image (most common non-black)
     obj_colors = []
     for rgb in rgb_images:
@@ -405,8 +330,44 @@ def main():
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # We'll write a simple CSV: viewpoint, occlusion
+    print("Computing representative colors for each object image...")
+    per_object_color_rows = []  # list of dicts to write later
+    # objects_by_view: keys are (th, ph) as strings, values are lists [(obj_id, path), ...]
+    for (th, ph), obj_list in sorted(objects_by_view.items(), key=lambda kv: (int(kv[0][0]), int(kv[0][1]))):
+        for obj_id, path in obj_list:
+            base = os.path.basename(path)
+            try:
+                img = Image.open(path).convert("RGB")
+                rgb_arr = np.asarray(img, dtype=np.uint8)
+                r, g, b = representative_color_of_image(rgb_arr, background_threshold=threshold)
+            except Exception as e:
+                print(f"[warn] Failed to load/parse image for color extraction '{path}': {e}")
+                r, g, b = (0, 0, 0)
+            per_object_color_rows.append({
+                "theta": int(th),
+                "phi": int(ph),
+                "obj_id": int(obj_id),
+                "filename": base,
+                "r": int(r),
+                "g": int(g),
+                "b": int(b)
+            })
+
+    # Write per-object colors CSV
+    per_object_colors_path = os.path.join(out_dir, "per_object_colors.csv")
+    try:
+        with open(per_object_colors_path, "w", newline="") as cf:
+            fieldnames = ["theta", "phi", "obj_id", "filename", "r", "g", "b"]
+            writer = csv.DictWriter(cf, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in per_object_color_rows:
+                writer.writerow(row)
+        print(f"Wrote per-object color mapping to: {per_object_colors_path}")
+    except Exception as e:
+        print(f"[error] failed to write per-object colors CSV {per_object_colors_path}: {e}")
+
     csv_path = os.path.join(out_dir, "occlusion_summary.csv")
+    per_object_csv_path = os.path.join(out_dir, "per_object_occlusion.csv")
 
     # Accumulators for overall stats
     all_pcts = []
@@ -414,6 +375,9 @@ def main():
 
     # Collect per-view averages and stds for writing the simplified CSV and plotting
     view_summaries = []  # list of (view_name:str, view_avg:float, view_std:float)
+
+    # *** ADDED: collect all per-object rows across all views
+    all_per_object_rows = []
 
     # Deterministic order over viewpoints (sort by theta, then phi as ints)
     def view_sort_key(k):
@@ -431,6 +395,9 @@ def main():
         th, ph = view_key
         view_name = f"theta{th}_phi{ph}"
         view_summaries.append((view_name, view_avg, view_std))
+
+        # *** ADDED: extend global per-object rows
+        all_per_object_rows.extend(per_object_rows)
 
         all_pcts.extend(pcts)
         total_objs += n
@@ -455,61 +422,23 @@ def main():
 
     print(f"CSV written to: {csv_path}")
 
-    # Grid Plot
-    try:
-        # parse view_summaries into numeric theta, phi arrays and values
-        thetas = sorted({int(v.split("_")[0].replace("theta", "")) for v, _, _ in view_summaries})
-        phis = sorted({int(v.split("_")[1].replace("phi", "")) for v, _, _ in view_summaries})
-        thetas_arr = np.array(thetas)
-        phis_arr = np.array(phis)
-
-        grid = np.full((len(thetas_arr), len(phis_arr)), np.nan, dtype=float)
-
-        # fill grid
-        for vname, vavg, _ in view_summaries:
-            th_str, ph_str = vname.split("_")
-            th = int(th_str.replace("theta", ""))
-            ph = int(ph_str.replace("phi", ""))
-
-            # NEW: extract scalar indices safely and handle missing entries
-            i_idx = np.flatnonzero(thetas_arr == th)
-            j_idx = np.flatnonzero(phis_arr == ph)
-            if i_idx.size == 0 or j_idx.size == 0:
-                # unexpected: this theta/phi wasn't found in the arrays — skip it
-                continue
-            i = int(i_idx[0])
-            j = int(j_idx[0])
-
-            grid[i, j] = vavg
-
-        grid_path = os.path.join(out_dir, "occlusion_grid.png")
-        plt.figure(figsize=(max(6, len(phis_arr) * 0.3), max(4, len(thetas_arr) * 0.3)), dpi=args.dpi)
-        im = plt.imshow(grid, aspect='auto', origin='lower')
-
-        # invert the y axis so top and bottom are reversed
-        ax = plt.gca()
-        ax.invert_yaxis()
-
-        plt.colorbar(im, label="Occlusion (%)")
-        plt.title("Per-view average occlusion (theta rows, phi cols)")
-        plt.xlabel("phi (deg) — columns in ascending order")
-        plt.ylabel("theta (deg) — rows in ascending order")
-
-        # annotate axis ticks with actual phi/theta values if reasonable size
-        if len(phis_arr) <= 20:
-            plt.xticks(range(len(phis_arr)), phis_arr, rotation=90)
-        if len(thetas_arr) <= 20:
-            # Because we inverted the y-axis, ticks still correspond to row indices.
-            plt.yticks(range(len(thetas_arr)), thetas_arr)
-
-        plt.tight_layout()
-        plt.savefig(grid_path, bbox_inches="tight")
-        plt.close()
-        print(f"Saved grid image: {grid_path}")
-    except Exception as e:
-        print(f"Failed to create grid plot: {e}")
-
-
+    # Use fieldnames matching the dict keys produced in per_object_rows
+    if all_per_object_rows:
+        fieldnames = ["level", "theta", "phi", "obj_id", "filename",
+                      "occlusion_pct", "view_avg_pct", "view_std_pct"]
+        try:
+            with open(per_object_csv_path, "w", newline="") as outf:
+                writer = csv.DictWriter(outf, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in all_per_object_rows:
+                    # Ensure we only write the fields in fieldnames order (and keep types simple)
+                    out_row = {k: row.get(k, "") for k in fieldnames}
+                    writer.writerow(out_row)
+            print(f"Per-object CSV written to: {per_object_csv_path}")
+        except Exception as e:
+            print(f"[error] failed to write per-object CSV {per_object_csv_path}: {e}")
+    else:
+        print("[info] No per-object rows to write to per_object_occlusion.csv")
 
 if __name__ == "__main__":
     main()
