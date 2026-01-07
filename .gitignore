@@ -2,7 +2,6 @@
 
 /data_collection/build/
 /data_collection/labeled_data/
-/data_collection/object_sets/
 /data_collection/testing/
 
 /data_collection/scene_poses.json

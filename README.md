@@ -40,10 +40,14 @@ cd ..
 python3 scripts/calculate_occlusion.py --input-dir <path_to_segmask_dir> --out-dir <out_directory> 
 ```
 
-This script computes the occlusion score for each object as well as the average occlusion for the entire viewpoint.
+This script computes the occlusion score for each object as well as the average occlusion for the entire viewpoint. It also produces images like below for each viewpoint
+
+![Demo](assets/example_occlusion.png)
+
 
 Run the script below for an interactive UI of the scene that visualizes the occlusion scores above.
 ```
 python3 scripts/occlusion_visualization_ui.py --csv <path_to_csv_produced above> --scene-dir <path_to_scene_images> --out-dir <out_dir>
 ```
 
+![Demo](assets/visualization_ui.gif)
