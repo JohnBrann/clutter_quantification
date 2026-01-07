@@ -2,6 +2,8 @@
 
 Below are the ordered instructions on how to generate scenes and there corresponding ground truth segmentation masks that we use to evaluate each scene. 
 
+![Demo](assets/visualization_ui.gif)
+
 ## Installation
 add docker instructions here and dependencies
 
@@ -45,9 +47,9 @@ This script computes the occlusion score for each object as well as the average 
 ![Demo](assets/example_occlusion.png)
 
 
-Run the script below for an interactive UI of the scene that visualizes the occlusion scores above.
+Run the script below for the interactive UI shown at the beginning of README showing occlusion scores from different viewpoints. 
 ```
 python3 scripts/occlusion_visualization_ui.py --csv <path_to_csv_produced above> --scene-dir <path_to_scene_images> --out-dir <out_dir>
 ```
 
-![Demo](assets/visualization_ui.gif)
+<!-- ![Demo](assets/visualization_ui.gif) -->
