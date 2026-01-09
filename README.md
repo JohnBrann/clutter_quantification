@@ -39,17 +39,19 @@ Occlusion represents the ratio between an object's ground-truth segmentation (as
 
 ```  
 cd ..
-python3 scripts/calculate_occlusion.py --input-dir <path_to_segmask_dir> --out-dir <out_directory> 
+python3 scripts/calculate_occlusion.py --dataset_name <name_of_dataset>
 ```
 
-This script computes the occlusion score for each object as well as the average occlusion for the entire viewpoint. It also produces images like below for each viewpoint
+This script computes the occlusion score for each object as well as the average occlusion for the entire viewpoint. It also produces images like below for each viewpoint.
+
+The dataset name is the name of the object_set used for that scene. 
 
 ![Demo](assets/example_occlusion.png)
 
 
 Run the script below for the interactive UI shown at the beginning of README showing occlusion scores from different viewpoints. 
 ```
-python3 scripts/occlusion_visualization_ui.py --csv <path_to_csv_produced above> --scene-dir <path_to_scene_images> --out-dir <out_dir>
+python3 scripts/occlusion_visualization_ui.py --dataset_name <name_of_dataset>
 ```
 
 <!-- ![Demo](assets/visualization_ui.gif) -->
@@ -59,7 +61,7 @@ We have also began exploring some distance evaluation metrics from these segment
 
 Run the script to draw connection points from objects in each viewpoint
 ```
-python3 ./scripts/calculate_distance.py --input-dir <path_to_scene_images>  --out-dir <out_dir> --occlusion-csv <path_to_per_object_occlusion_csv>    --colors-csv <path_to_per_object_color_csv>    --occlusion-threshold 50.0
+python3 ./scripts/calculate_distance.py --dataset-name <name_of_dataset>    --occlusion-threshold 50.0
 ```
 
 This is an example resulting image from a single viewpoint. Notice we filter out objects that are above a certain occlusion threshold, We did this to make clearer connections between objects. We also believe objects above a certain occlusion threshold are ungraspable and the inclusion of them is not valuable. We are still exploring this metric and how we want to quantify it. 
@@ -68,6 +70,6 @@ This is an example resulting image from a single viewpoint. Notice we filter out
 
 Run the script below for the interactive UI shown at the beginning of README showing occlusion scores from different viewpoints that also includes the distance images. 
 ```
-python3 ./scripts/occlusion_and_distance_visualization_ui.py --scene-dir <path_to_scene_images> --out-dir <out_dir> --occlusion-csv <path_to_per_object_occlusion_csv> --distances-dir <path_to_distances_dir> --connections-summary-csv <path_to_distance_summary_csv>
+python3 ./scripts/occlusion_and_distance_visualization_ui.py ----dataset_name <name_of_dataset> --gripper-width 32
 ```
 ![Demo](assets/visualization_ui_2.gif)
