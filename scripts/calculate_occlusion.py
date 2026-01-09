@@ -12,9 +12,9 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 def parse_args():
     p = argparse.ArgumentParser(description="Multi-view occlusion report using SCENE images as overlay (+ CSV).")
-    p.add_argument("--input-dir", type=str, default=".", help="Folder containing object PNGs and the 'scene' subfolder.")
+    # CHANGED: single dataset_name argument
+    p.add_argument("--dataset-name", type=str, help="Folder name under ./data/<dataset_name>.")
     p.add_argument("--threshold", type=int, default=0, help="RGB threshold [0..255]: pixel is object if any channel > threshold.")
-    p.add_argument("--out-dir", type=str, default="scene_occlusion_out", help="Where to write per-viewpoint report figures and CSV.")
     p.add_argument("--dpi", type=int, default=140, help="Figure DPI.")
     p.add_argument("--max_cols", type=int, default=6, help="Max columns before wrapping rows.")
     return p.parse_args()
@@ -41,14 +41,13 @@ def find_objects_by_view(input_dir):
         out[key].sort(key=lambda t: t[0])
     return dict(out)
 
-def find_scene_map(input_dir):
+def find_scene_map(scene_dir):
     """
     Index scene images by (theta, phi). These are REQUIRED
     because we display them as the overlay.
     """
-    scene_dir = os.path.join(input_dir, "scene")
     if not os.path.isdir(scene_dir):
-        raise FileNotFoundError(f"Required 'scene' subfolder not found in: {input_dir}")
+        raise FileNotFoundError(f"Required 'scene' subfolder not found in: {scene_dir}")
     scenes = {}
     for p in glob(os.path.join(scene_dir, "*.png")):
         m = SCENE_RE.match(os.path.basename(p))
@@ -311,16 +310,19 @@ def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_co
 
 def main():
     args = parse_args()
-    input_dir = args.input_dir
-    out_dir = args.out_dir
+
+    # CHANGED: derive input_dir/out_dir from dataset_name
+    input_dir = os.path.join(".", "data", args.dataset_name, "scene_groundtruths")
+    object_input_dir = os.path.join(".", "data", args.dataset_name, "object_groundtruths")
+    out_dir = os.path.join(".", "data", args.dataset_name, "occlusion")
     threshold = args.threshold
 
     # Find objects grouped by viewpoint
-    objects_by_view = find_objects_by_view(input_dir)
+    objects_by_view = find_objects_by_view(object_input_dir)
     if not objects_by_view:
-        raise FileNotFoundError(f"No object files found in {input_dir} matching pattern theta*_phi*_obj*_color.png")
+        raise FileNotFoundError(f"No object files found in {object_input_dir} matching pattern theta*_phi*_obj*_color.png")
 
-    # Scenes are REQUIRED now (we use them for the overlay)
+    # Scenes folder
     scenes = find_scene_map(input_dir)
     # Check that every viewpoint with objects has a scene
     missing = [k for k in objects_by_view.keys() if k not in scenes]

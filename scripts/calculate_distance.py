@@ -1,29 +1,3 @@
-
-# # python3 ./distance_calculations_no_border.py   --input-dir ../pybullet/scene01/scene/   --out-dir scene01_out2d   --occlusion-csv ../pybullet/scene01_out/per_object_occlusion.csv   --colors-csv ../pybullet/scene01_out/per_object_colors.csv   --occlusion-threshold 50.0
-
-#!/usr/bin/env python3
-"""
-Batch 2D distance metric (perimeter-corrected) with occlusion-based filtering.
-
-This script processes ALL segmented scene images in an input folder and writes
-per-image outputs (visualization PNG, per-point CSV, metrics CSV) into an
-output directory. Optionally, objects that are heavily occluded (per a provided
-occlusion CSV) are removed from consideration by color before computing
-connections.
-
-New: excluded objects are blacked-out in the visualization PNG so you can see
-which objects were removed while the distance computation uses only the
-remaining objects. Also writes a single summary CSV with connection counts.
-
-Usage example:
-  python batch_distances_with_occlusion_filter.py \
-    --input-dir scenes \
-    --out-dir distances_out \
-    --occlusion-csv /path/to/per_object_occlusion.csv \
-    --colors-csv /path/to/per_object_colors.csv \
-    --occlusion-threshold 50.0
-"""
-
 import argparse
 import csv
 from dataclasses import dataclass
@@ -31,7 +5,6 @@ from typing import List, Tuple, Optional, Dict, Set
 import os
 from glob import glob
 import numpy as np
-import imageio.v3 as iio
 import matplotlib.pyplot as plt
 from scipy.ndimage import binary_erosion
 from scipy.spatial import cKDTree
@@ -44,6 +17,15 @@ try:
     HAVE_SKIMAGE = True
 except Exception:
     HAVE_SKIMAGE = False
+
+from PIL import Image
+
+def imread_rgb(path: str) -> np.ndarray:
+    return np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+
+def imwrite_rgb(path: str, arr: np.ndarray) -> None:
+    Image.fromarray(arr.astype(np.uint8)).save(path)
+
 
 
 @dataclass
@@ -464,7 +446,7 @@ def process_single_image(img_path: str, out_dir: str, args: argparse.Namespace,
       }
     """
     print(f"\nProcessing: {img_path}")
-    img = iio.imread(img_path)
+    img = imread_rgb(img_path)
     if img.ndim == 2:
         img = np.stack([img, img, img], axis=-1)
     if img.shape[2] == 4:
@@ -526,7 +508,7 @@ def process_single_image(img_path: str, out_dir: str, args: argparse.Namespace,
                 masked_img[ys, xs] = np.array([0, 0, 0], dtype=np.uint8)
         masked_out_path = os.path.join(out_dir, f"{basename}_masked.png")
         try:
-            iio.imwrite(masked_out_path, masked_img)
+            imwrite_rgb(masked_out_path, masked_img)
         except Exception:
             pass
 
@@ -555,7 +537,7 @@ def process_single_image(img_path: str, out_dir: str, args: argparse.Namespace,
     basename = safe_basename_no_ext(img_path)
     masked_out_path = os.path.join(out_dir, f"{basename}_masked.png")
     try:
-        iio.imwrite(masked_out_path, masked_img)
+        imwrite_rgb(masked_out_path, masked_img)
         if args.verbose:
             print(f"  Saved masked raw image (excluded objects blacked out): {masked_out_path}")
     except Exception as e:
@@ -631,12 +613,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Batch compute 2D perimeter-corrected distances for segmented images in a folder."
     )
-    parser.add_argument("--input-dir", required=True,
-                        help="Folder containing segmented images (PNG).")
+
+    # CHANGED: single dataset_name argument
+    parser.add_argument("--dataset-name", required=True,
+                        help="Dataset folder name under ./data/<dataset_name>/")
+
+    # Keep these knobs (still useful)
     parser.add_argument("--glob", default="*.png",
                         help="Glob pattern to select images in input-dir (default '*.png').")
-    parser.add_argument("--out-dir", default="distances_out",
-                        help="Directory to write per-image outputs (created if missing).")
     parser.add_argument("--gripper-width", type=float, default=32.0,
                         help="Gripper width in pixels (threshold for blocked/clear).")
     parser.add_argument("--spacing", type=float, default=16.0,
@@ -646,21 +630,32 @@ def main():
     parser.add_argument("--skip-patterns", default="_distances,_metrics,_masked",
                         help="Comma-separated substrings; files containing any will be skipped (default: '_distances,_metrics,_masked').")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging")
-    # occlusion/color filtering args
-    parser.add_argument("--occlusion-csv", default=None,
-                        help="Path to per-object occlusion CSV (level,theta,phi,obj_id,filename,occlusion_pct,...). Optional.")
-    parser.add_argument("--colors-csv", default=None,
-                        help="Path to per-object colors CSV (theta,phi,obj_id,filename,r,g,b). Optional.")
+
+    # occlusion/color filtering knobs (paths are derived automatically)
     parser.add_argument("--occlusion-threshold", type=float, default=50.0,
                         help="Occlusion threshold pct: objects with occlusion_pct >= this are excluded (default 50.0).")
     parser.add_argument("--occlusion-color-tol", type=int, default=0,
                         help="Color distance tolerance (Euclidean) used when comparing segment color to excluded colors (default 0 = exact match).")
+
     args = parser.parse_args()
 
-    input_dir = args.input_dir
-    pattern = args.glob
-    out_dir = args.out_dir
+    # CHANGED: derive paths from dataset_name
+    base_dir = os.path.join(".", "data", args.dataset_name)
+    input_dir = os.path.join(base_dir, "scene_groundtruths")
+    out_dir = os.path.join(base_dir, "distance")
     os.makedirs(out_dir, exist_ok=True)
+
+    # CHANGED: occlusion/color CSV locations (derived)
+    args.occlusion_csv = os.path.join(base_dir, "occlusion", "per_object_occlusion.csv")
+    args.colors_csv = os.path.join(base_dir, "occlusion", "per_object_colors.csv")
+
+    print(f"Input dir:       {input_dir}")
+    print(f"Output dir:      {out_dir}")
+    print(f"Occlusion CSV:   {args.occlusion_csv}")
+    print(f"Colors CSV:      {args.colors_csv}")
+
+    pattern = args.glob
+
 
     # Load color mapping (if provided)
     color_map = load_colors_csv(args.colors_csv)  # keyed by (theta,phi,filename) and fallback (0,0,filename)

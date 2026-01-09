@@ -11,9 +11,7 @@ SCENE_RE = re.compile(r"^theta(\d+)_phi(\d+)_scene\.png$")
 
 def parse_args():
     p = argparse.ArgumentParser(description="Create interactive occlusion grid from CSV + scene images.")
-    p.add_argument("--csv", required=True, help="CSV file produced by the occlusion script (viewpoint, occlusion).")
-    p.add_argument("--scene-dir", default=None, help="Directory containing scene images (thetaXXX_phiYYY_scene.png). If omitted, uses 'scene' sibling of the CSV file.")
-    p.add_argument("--out-dir", default=".", help="Where to save the grid preview image (occlusion_grid.png).")
+    p.add_argument("--dataset_name", required=True, help="Folder name under ./data/<dataset_name>.")
     p.add_argument("--dpi", type=int, default=140, help="Figure DPI for saved preview image.")
     p.add_argument("--max_fig_w", type=float, default=9.0, help="Maximum figure width (inches).")
     p.add_argument("--max_fig_h", type=float, default=6.0, help="Maximum figure height (inches).")
@@ -32,7 +30,6 @@ def read_csv_view_summaries(csv_path):
     if not rows:
         raise ValueError(f"CSV {csv_path} is empty")
 
-    # Handle header detection: first row contains 'viewpoint' probably
     start_idx = 0
     first = [c.strip().lower() for c in rows[0]]
     if len(first) >= 1 and first[0] == "viewpoint":
@@ -67,19 +64,25 @@ def index_scenes(scene_dir):
     return scenes
 
 def main():
-    args = parse_args()
+    p = argparse.ArgumentParser(
+        description="Create interactive occlusion grid from CSV + scene images."
+    )
+    p.add_argument("--dataset-name", required=True, help="Folder name under ./data/<dataset_name>.")
+    p.add_argument("--dpi", type=int, default=140, help="Figure DPI for saved preview image.")
+    p.add_argument("--max_fig_w", type=float, default=9.0, help="Maximum figure width (inches).")
+    p.add_argument("--max_fig_h", type=float, default=6.0, help="Maximum figure height (inches).")
 
-    csv_path = args.csv
+    args = p.parse_args()
+
+    # derive paths from dataset_name
+    base_dir = os.path.join(".", "data", args.dataset_name)
+    out_dir = os.path.join(base_dir, "occlusion")
+    csv_path = os.path.join(out_dir, "occlusion_summary.csv")
+    scene_dir = os.path.join(base_dir, "scene_groundtruths")
+
     if not os.path.isfile(csv_path):
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-    # determine default scene_dir (sibling 'scene' to the CSV) if not provided
-    if args.scene_dir:
-        scene_dir = args.scene_dir
-    else:
-        scene_dir = os.path.join(os.path.dirname(os.path.abspath(csv_path)), "scene")
-
-    out_dir = args.out_dir
     os.makedirs(out_dir, exist_ok=True)
     grid_path = os.path.join(out_dir, "occlusion_grid.png")
 
@@ -100,11 +103,9 @@ def main():
     grid = np.full((len(thetas_arr), len(phis_arr)), np.nan, dtype=float)
     scene_image_map = {}
 
-    # Determine padding lengths for scene keys if available
     pad_th = 0
     pad_ph = 0
     if scenes:
-        # get lengths from first key
         first_key = next(iter(scenes.keys()))
         pad_th = len(first_key[0])
         pad_ph = len(first_key[1])
@@ -125,7 +126,6 @@ def main():
         j = int(j_idx[0])
         grid[i, j] = vavg
 
-        # Map scene image if exists (try zero-padded keys if available, else try unpadded)
         if pad_th and pad_ph:
             th_pad = str(th).zfill(pad_th)
             ph_pad = str(ph).zfill(pad_ph)
@@ -133,7 +133,6 @@ def main():
             if key in scenes:
                 scene_image_map[(i, j)] = scenes[key]
                 continue
-        # try non-padded match
         key2 = (str(th), str(ph))
         if key2 in scenes:
             scene_image_map[(i, j)] = scenes[key2]
@@ -245,7 +244,6 @@ def main():
 
     fig.canvas.mpl_connect('motion_notify_event', on_hover)
 
-    # Save compact preview and show interactive plot
     plt.savefig(grid_path, bbox_inches="tight", dpi=args.dpi)
     print(f"Saved grid image: {grid_path}")
     print("Displaying interactive plot. Hover over grid cells to view scene images. Close window to exit.")
@@ -253,6 +251,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# python3 ./scripts/occlusion_visualization_ui.py --csv ./data/testing_out/occlusion_summary.csv --scene-dir ./data/testing/scene/ --out-dir ./data/testing_out/

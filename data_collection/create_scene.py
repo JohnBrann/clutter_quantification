@@ -27,7 +27,7 @@ EPS_THETA = 1e-3                    # small nudge to avoid degeneracy at 0 or pi
 
 
 THETA_STEP_DEG = 10
-AZIMUTH_STEP_DEG = 30
+AZIMUTH_STEP_DEG = 20
 
 VIEW_THETAS_DEG = sorted(set(list(range(0, 90, THETA_STEP_DEG)) + [90]))
 
@@ -122,8 +122,9 @@ def build_extrinsics(sim):
 # ----------------------------
 # Saving helpers
 # ----------------------------
-def save_scene_single_file(save_root: Path,
+def save_scene_single_file(out_dir: Path,
                            scene_id: str,
+                           object_set: str,
                            depth_imgs: np.ndarray,
                            seg_imgs: np.ndarray,
                            extr_list: np.ndarray,
@@ -148,9 +149,9 @@ def save_scene_single_file(save_root: Path,
       - view_phi_deg   (N,) float32
       - scene_id (str)
     """
-    scenes_dir = save_root / "scenes"
-    scenes_dir.mkdir(parents=True, exist_ok=True)
-    out_path = scenes_dir / f"{scene_id}_all.npz"
+    # scenes_dir = save_root / "scenes"
+    # scenes_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{object_set}_scene.npz"
     np.savez_compressed(
         out_path,
         scene_id=np.array(scene_id),
@@ -362,14 +363,37 @@ def preview_viewpoints(sim, extrinsics, theta_phi_pairs, center, delay=1.0):
 # ----------------------------
 # Main (per-viewpoint ordering; viewpoints from in-code list only)
 # ----------------------------
-def main(args):
+def main():
+    parser = argparse.ArgumentParser()
+    # parser.add_argument("--root", type=Path, default=Path("labeled_data"))
+    parser.add_argument("--scene", type=str, choices=["pile", "packed"], default="pile")
+    parser.add_argument("--object-set", type=str, default="blocks")
+    parser.add_argument("--sim-gui", action="store_true")
+    parser.add_argument("--delay", type=float, default=0.0,
+                        help="Seconds between viewpoints.")
+    parser.add_argument("--idle-after", action="store_true",
+                        help="Idle after the tour so the GUI stays open.")
+    parser.add_argument("--remove-box", action="store_true",
+                        help="remove the box from the scene or not")
+
+    args = parser.parse_args()
+
+    dataset_name = Path(args.object_set).name
+
+    out_dir = Path("../data") / dataset_name
+
+    # Ensure metadata dir exists (write_setup writes here)
+    # (args.root / "mesh_pose_list").mkdir(parents=True, exist_ok=True)
+
+
+
     np.random.seed()
     sim = ClutterRemovalSim(args.scene, args.object_set, gui=args.sim_gui, remove_box=args.remove_box)
 
     # Output root + setup metadata
-    (args.root / "scenes").mkdir(parents=True, exist_ok=True)
+    (out_dir).mkdir(parents=True, exist_ok=True)
     write_setup(
-        args.root,
+        out_dir,
         sim.size,
         sim.camera.intrinsic,
         sim.gripper.max_opening_width,
@@ -377,7 +401,7 @@ def main(args):
     )
 
     # Build one cluttered scene and settle
-    object_count = 9
+    object_count = 8
     sim.reset(object_count)
 
     # --- Build extrinsics ONLY from the in-code list ---
@@ -464,14 +488,15 @@ def main(args):
             set_all_bodies_visibility(sim.world, True)
 
     # ---------- Save single-file artifact ----------
-    scenes_dir = args.root / "scenes"
-    scenes_dir.mkdir(parents=True, exist_ok=True)
+    # scenes_dir = args.root / "scenes"
+    # scenes_dir.mkdir(parents=True, exist_ok=True)
 
     scene_id = uuid4().hex
     bodies_json = json.dumps(bodies)
     out_path = save_scene_single_file(
-        args.root,
+        out_dir,
         scene_id,
+        dataset_name,
         depth_imgs,
         seg_imgs,
         extr_list,
@@ -504,7 +529,7 @@ def main(args):
         },
         "output_npz": str(out_path.name),
     }
-    man_path = scenes_dir / f"{scene_id}_manifest.json"
+    man_path = out_dir / f"{dataset_name}_manifest.json"
     with open(man_path, "w") as f:
         json.dump(manifest, f, indent=2)
     print("[saved] manifest ->", man_path.resolve())
@@ -523,26 +548,4 @@ def main(args):
 # CLI
 # ----------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path("labeled_data"))
-    parser.add_argument("--scene", type=str, choices=["pile", "packed"], default="pile")
-    parser.add_argument("--object-set", type=str, default="blocks")
-    parser.add_argument("--sim-gui", action="store_true")
-    parser.add_argument("--delay", type=float, default=0.0,
-                        help="Seconds between viewpoints.")
-    parser.add_argument("--idle-after", action="store_true",
-                        help="Idle after the tour so the GUI stays open.")
-    parser.add_argument("--remove-box", action="store_true",
-                        help="remove the box from the scene or not")
-
-    args = parser.parse_args()
-
-    dataset_name = Path(args.object_set).name
-    print(f"args.root: {args.root}")
-    args.root = args.root / dataset_name
-    print(f"args.root: {args.root}")
-
-    # Ensure metadata dir exists (write_setup writes here)
-    (args.root / "mesh_pose_list").mkdir(parents=True, exist_ok=True)
-
-    main(args)
+    main()

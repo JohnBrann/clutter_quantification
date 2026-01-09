@@ -24,11 +24,11 @@ python3 create_scene.py --object-set blocks --remove-box
 ```
 
 
-The viewpoint data of the scene will be saved to a .npz file similar to this: a98ddb6f57344cc9bd520e7fc1e04b75_all.npz. To generate the segmentation masks for each vewipoint run the following.
+The viewpoint data of the scene will be saved to a .npz. To generate the segmentation masks for each vewipoint run the following.
 ```
-python3 visualize_npy.py labeled_data/atb/scenes/a98ddb6f57344cc9bd520e7fc1e04b75_all.npz  --out <out_directory> 
+python3 visualize_npy.py --scene <object_set_name> 
 ```
-Make sure to replace the .npz file with the correct file name. This script will vizualize each vewipoints and each object from that viewpoints segmentation mask.
+This script will vizualize each vewipoints and each object from that viewpoints segmentation mask.
 
 
 ## Quantification  

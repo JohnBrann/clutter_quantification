@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import argparse
 from pathlib import Path
 
@@ -295,19 +294,20 @@ def main():
         description="Create segmentation PNGs (scene + per-object) from a .npz/.npy bundle or directory."
     )
     ap.add_argument(
-        "input",
+        "--scene",
         type=Path,
         help="Path to .npz/.npy or a directory (supports *_all.npz-style bundles).",
     )
-    ap.add_argument(
-        "--out",
-        type=Path,
-        default=Path("png_out"),
-        help="Output directory for PNG export.",
-    )
+
     args = ap.parse_args()
 
-    bundle = load_bundle(args.input)
+    scene_dir = Path("../data") / args.scene
+    npz_path = next(scene_dir.glob("*.npz"))  
+
+    print(f"Using bundle: {npz_path}")
+
+    bundle = load_bundle(npz_path)
+
     segs = bundle.get("seg", None)                      # (N,H,W) int or None (full-scene)
     per_obj_masks = bundle.get("per_obj_masks", None)   # (N,K,H,W) uint8 or None
     per_obj_seg_uids = bundle.get("per_obj_seg_uids", None)  # (N,K,H,W) int32 or None
@@ -336,9 +336,14 @@ def main():
         print("No segmentation data to export.")
         return
 
-    outdir = args.out
-    scene_dir = outdir / "scene"
+    outdir = scene_dir
+    # folder for ground truth segmentation masks of a scene
+    scene_dir = outdir / "scene_groundtruths"
     scene_dir.mkdir(parents=True, exist_ok=True)
+    
+    # folder for ground truth segmentation masks of each object
+    object_dir = outdir / "object_groundtruths"
+    object_dir.mkdir(parents=True, exist_ok=True)
 
     for i in range(N):
         tag = angle_tag(theta_deg, phi_deg, i)
@@ -382,12 +387,9 @@ def main():
                     colored_mask = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
                     colored_mask[mask != 0] = uid_color_lut[k, :3]
                     uid = int(obj_uids[k])
-                    cv2.imwrite(str(outdir / f"{tag}_obj{uid:03d}_color.png"), colored_mask)
+                    cv2.imwrite(str(object_dir / f"{tag}_obj{uid:03d}_color.png"), colored_mask)
 
     print(f"Saved segmentation PNGs to: {outdir.resolve()}")
 
 if __name__ == "__main__":
     main()
-
-
-# python visualize_npy.py labeled_data/atb/scenes/a98ddb6f57344cc9bd520e7fc1e04b75_all.npz  --out full_test_run 

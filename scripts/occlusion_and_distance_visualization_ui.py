@@ -33,20 +33,14 @@ SCENE_BASENAME_RE = re.compile(r"^(theta0*?(\d+)_phi0*?(\d+))(?:_scene)?$", flag
 
 def parse_args():
     p = argparse.ArgumentParser(description="Interactive occlusion + 2D distances grid viewer.")
-    p.add_argument("--occlusion-csv", required=True, help="CSV file produced by the occlusion script (viewpoint, occlusion).")
-    p.add_argument("--scene-dir", default=None,
-                   help="Directory containing scene images (thetaXXX_phiYYY_scene.png). If omitted, uses 'scene' sibling of the CSV file.")
-    p.add_argument("--distances-dir", default=None,
-                   help="Directory containing per-scene distances visualizations (basename_distances_viz.png). If omitted, uses CSV parent dir.")
-    p.add_argument("--connections-summary-csv", default=None,
-                   help="CSV with per-scene connection counts (connections_summary.csv). If omitted, looks in distances-dir or csv parent dir.")
+    p.add_argument("--dataset-name", required=True, help="Dataset folder name under ./data/<dataset_name>/")
     p.add_argument("--gripper-width", type=float, default=None,
                    help="Gripper width to display on the 2D panel (informational). If not provided, shows 'unknown'.")
-    p.add_argument("--out-dir", default=".", help="Where to save the static occlusion grid preview image.")
     p.add_argument("--dpi", type=int, default=140, help="Figure DPI for saved preview image.")
     p.add_argument("--max_fig_w", type=float, default=10.0, help="Maximum figure width (inches).")
     p.add_argument("--max_fig_h", type=float, default=7.0, help="Maximum figure height (inches).")
     return p.parse_args()
+
 
 
 def read_csv_view_summaries(csv_path):
@@ -209,34 +203,19 @@ def load_connections_summary(summary_csv_path):
 def main():
     args = parse_args()
 
-    csv_path = args.occlusion_csv
+    base_dir = os.path.join(".", "data", args.dataset_name)
+
+    # derived inputs
+    csv_path = os.path.join(base_dir, "occlusion", "occlusion_summary.csv")
+    scene_dir = os.path.join(base_dir, "scene_groundtruths")
+    dist_dir = os.path.join(base_dir, "distance")
+    summary_path = os.path.join(dist_dir, "connections_summary.csv")
+
     if not os.path.isfile(csv_path):
-        raise FileNotFoundError(f"CSV not found: {csv_path}")
+        raise FileNotFoundError(f"Occlusion CSV not found: {csv_path}")
 
-    # determine default scene_dir (sibling 'scene' to the CSV) if not provided
-    if args.scene_dir:
-        scene_dir = args.scene_dir
-    else:
-        scene_dir = os.path.join(os.path.dirname(os.path.abspath(csv_path)), "scene")
-
-    # distances directory default -> csv parent dir
-    if args.distances_dir:
-        dist_dir = args.distances_dir
-    else:
-        dist_dir = os.path.dirname(os.path.abspath(csv_path))
-
-    # connections summary default
-    if args.connections_summary_csv:
-        summary_path = args.connections_summary_csv
-    else:
-        candidate = os.path.join(dist_dir, "connections_summary.csv")
-        if os.path.isfile(candidate):
-            summary_path = candidate
-        else:
-            candidate2 = os.path.join(os.path.dirname(os.path.abspath(csv_path)), "connections_summary.csv")
-            summary_path = candidate2 if os.path.isfile(candidate2) else None
-
-    out_dir = args.out_dir
+    # output goes to occlusion folder
+    out_dir = os.path.join(base_dir, "occlusion")
     os.makedirs(out_dir, exist_ok=True)
     grid_path = os.path.join(out_dir, "occlusion_grid.png")
 
@@ -410,7 +389,10 @@ def main():
             # if frac_blocked is not None:
             #     lines.append(f"Fraction blocked: {frac_blocked:.3f}")
             lines.append(f"EEF Threshold: {threshold_str}")
-            lines.append(f'ratio: {blocked/total:.2f}')
+            if total is not None and total > 0 and blocked is not None:
+                lines.append(f"ratio: {blocked/total:.2f}")
+            else:
+                lines.append("ratio: N/A")
 
             # Place text bottom-right
             ax.text(0.98, 0.02, "\n".join(lines),
