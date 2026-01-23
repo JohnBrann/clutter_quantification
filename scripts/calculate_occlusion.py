@@ -12,7 +12,7 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 def parse_args():
     p = argparse.ArgumentParser(description="Multi-view occlusion report using SCENE images as overlay (+ CSV).")
-    # CHANGED: single dataset_name argument
+    
     p.add_argument("--dataset-name", type=str, help="Folder name under ./data/<dataset_name>.")
     p.add_argument("--threshold", type=int, default=0, help="RGB threshold [0..255]: pixel is object if any channel > threshold.")
     p.add_argument("--dpi", type=int, default=140, help="Figure DPI.")
@@ -272,13 +272,13 @@ def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_co
     )
 
     # Per-view summary
-    print(f"[view theta{th}_phi{ph}] Saved report: {fig_path}")
+    # print(f"[view theta{th}_phi{ph}] Saved report: {fig_path}")
     per_object_rows = []
     for i, (fp, pct) in enumerate(zip(files, occlusion_pct), start=1):
         base = os.path.basename(fp)
         m = OBJ_RE.match(base)
         obj_id = int(m.group(3)) if m else None
-        print(f"  [{i:02d}] {base}  occlusion={pct:6.2f}%")
+        # print(f"  [{i:02d}] {base}  occlusion={pct:6.2f}%")
         per_object_rows.append({
             "level": "object",
             "theta": int(th),
@@ -290,7 +290,7 @@ def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_co
             "view_std_pct": round(view_std, 6),
             "figure_path": fig_path
         })
-    print(f"  View average occlusion: {view_avg:.2f}%  std: {view_std:.2f}%\n")
+    # print(f"  View average occlusion: {view_avg:.2f}%  std: {view_std:.2f}%\n")
 
     view_row = {
         "level": "view",
@@ -306,15 +306,33 @@ def process_view(view_key, obj_list, scene_path, threshold, out_dir, dpi, max_co
 
     return occlusion_pct, view_avg, view_std, len(occlusion_pct), fig_path, per_object_rows, view_row
 
+def resolve_scene_root(dataset_name: str) -> str:
+    # Case 1: dataset_name is already a path
+    if os.path.exists(dataset_name):
+        return dataset_name
+
+    # Case 2: old layout: ./data/<dataset_name>
+    p_old = os.path.join(".", "data", dataset_name)
+    if os.path.exists(p_old):
+        return p_old
+
+    # Case 3: replica layout: ../data/replica/<dataset_name>
+    p_rep = os.path.join("..", "data", "replica", dataset_name)
+    if os.path.exists(p_rep):
+        return p_rep
+
+    raise FileNotFoundError(f"Could not resolve scene root from --dataset-name={dataset_name}")
 
 
 def main():
     args = parse_args()
 
     # CHANGED: derive input_dir/out_dir from dataset_name
-    input_dir = os.path.join(".", "data", args.dataset_name, "scene_groundtruths")
-    object_input_dir = os.path.join(".", "data", args.dataset_name, "object_groundtruths")
-    out_dir = os.path.join(".", "data", args.dataset_name, "occlusion")
+    scene_root = resolve_scene_root(args.dataset_name)
+
+    input_dir = os.path.join(scene_root, "scene_groundtruths")
+    object_input_dir = os.path.join(scene_root, "object_groundtruths")
+    out_dir = os.path.join(scene_root, "occlusion")
     threshold = args.threshold
 
     # Find objects grouped by viewpoint
@@ -332,7 +350,7 @@ def main():
 
     os.makedirs(out_dir, exist_ok=True)
 
-    print("Computing representative colors for each object image...")
+    # print("Computing representative colors for each object image...")
     per_object_color_rows = []  # list of dicts to write later
     # objects_by_view: keys are (th, ph) as strings, values are lists [(obj_id, path), ...]
     for (th, ph), obj_list in sorted(objects_by_view.items(), key=lambda kv: (int(kv[0][0]), int(kv[0][1]))):
@@ -364,7 +382,7 @@ def main():
             writer.writeheader()
             for row in per_object_color_rows:
                 writer.writerow(row)
-        print(f"Wrote per-object color mapping to: {per_object_colors_path}")
+        # print(f"Wrote per-object color mapping to: {per_object_colors_path}")
     except Exception as e:
         print(f"[error] failed to write per-object colors CSV {per_object_colors_path}: {e}")
 
@@ -407,11 +425,11 @@ def main():
     overall_avg = float(np.mean(all_pcts)) if all_pcts else 0.0
     overall_std = float(np.std(all_pcts)) if all_pcts else 0.0
 
-    print("=" * 60)
-    print(f"Processed {len(objects_by_view)} viewpoints, {total_objs} objects total.")
-    print(f"Average occlusion across ALL objects from ALL viewpoints: {overall_avg:.2f}%")
-    print(f"Standard deviation of occlusion across ALL objects: {overall_std:.2f}%")
-    print("=" * 60)
+    # print("=" * 60)
+    # print(f"Processed {len(objects_by_view)} viewpoints, {total_objs} objects total.")
+    # print(f"Average occlusion across ALL objects from ALL viewpoints: {overall_avg:.2f}%")
+    # print(f"Standard deviation of occlusion across ALL objects: {overall_std:.2f}%")
+    # print("=" * 60)
 
     # Write simplified CSV: one row per viewpoint (viewpoint, occlusion), final row full_scene
     with open(csv_path, "w", newline="") as f:
@@ -422,7 +440,7 @@ def main():
         # final overall row
         writer.writerow(["full_scene", f"{overall_avg:.6f}"])
 
-    print(f"CSV written to: {csv_path}")
+    # print(f"CSV written to: {csv_path}")
 
     # Use fieldnames matching the dict keys produced in per_object_rows
     if all_per_object_rows:
@@ -436,7 +454,7 @@ def main():
                     # Ensure we only write the fields in fieldnames order (and keep types simple)
                     out_row = {k: row.get(k, "") for k in fieldnames}
                     writer.writerow(out_row)
-            print(f"Per-object CSV written to: {per_object_csv_path}")
+            # print(f"Per-object CSV written to: {per_object_csv_path}")
         except Exception as e:
             print(f"[error] failed to write per-object CSV {per_object_csv_path}: {e}")
     else:

@@ -1,4 +1,4 @@
-# Dockerfile for grasp-data-collection
+# Dockerfile for clutter data collection
 FROM ros:noetic-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive

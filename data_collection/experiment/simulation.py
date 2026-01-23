@@ -14,40 +14,15 @@ import cv2
 from scipy.spatial.transform import Slerp
 import json
 
-def create_point_cloud_from_depth_image(depth, camera, organized=False):
-    """ Generate point cloud using depth image only.
-
-        Input:
-            depth: [numpy.ndarray, (H,W), numpy.float32]
-                depth image
-            camera: [CameraInfo]
-                camera intrinsics
-            organized: bool
-                whether to keep the cloud in image shape (H,W,3)
-
-        Output:
-            cloud: [numpy.ndarray, (H,W,3)/(H*W,3), numpy.float32]
-                generated cloud, (H,W,3) for organized=True, (H*W,3) for organized=False
-    """
-    assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width)
-    xmap = np.arange(camera.width)
-    ymap = np.arange(camera.height)
-    xmap, ymap = np.meshgrid(xmap, ymap)
-    points_z = depth / camera.scale
-    points_x = (xmap - camera.cx) * points_z / camera.fx
-    points_y = (ymap - camera.cy) * points_z / camera.fy
-    cloud = np.stack([points_x, points_y, points_z], axis=-1)
-    if not organized:
-        cloud = cloud.reshape([-1, 3])
-    return cloud
 
 class ClutterRemovalSim(object):
-    def __init__(self, scene, object_set, gui=True, seed=None, add_noise=False, sideview=False, save_dir=None, save_freq=8, remove_box=True):
-        assert scene in ["pile", "packed", "real_packed","real_pile"]
+    def __init__(self, scene, object_set, gui=True, seed=None, add_noise=False, sideview=False, save_dir=None, save_freq=8, remove_box=True, replica_scene_id=0):
+        assert scene in ["pile", "packed", "real_packed","real_pile", "replica"]
 
         self.urdf_root = Path("object_sets")
         self.scene = scene
         self.object_set = object_set
+        self.replica_scene_id = replica_scene_id
         self.discover_objects()
 
         self.global_scaling = {
@@ -86,6 +61,7 @@ class ClutterRemovalSim(object):
             (p for p in root.glob("*/fused/*.urdf") if p.is_file()),
             key=lambda p: p.stem
         )
+        print(f'{self.object_urdfs}')
 
     def save_state(self):
         self._snapshot_id = self.world.save_state()
@@ -113,6 +89,9 @@ class ClutterRemovalSim(object):
             self.generate_pile_scene(object_count, table_height)
         elif self.scene == "packed":
             self.generate_packed_scene(object_count, table_height)
+        elif self.scene == "replica":
+            replica_scene_path = Path("scene_replica_scenes") / "scenes"
+            self.generate_replica_scene(table_height, self.replica_scene_id, replica_scene_path)
         else:
             raise ValueError("Invalid scene argument")
 
@@ -227,6 +206,53 @@ class ClutterRemovalSim(object):
 
         # save pos and quaternion of each object to a json file
         self.save_poses_to_json()
+
+
+    def generate_replica_scene(self, table_height, scene_number, replica_scene_path=1, scale=1.0):
+        # Get scene data
+        full_scene_path = Path(replica_scene_path) / f"{scene_number}.npz"
+        data = np.load(full_scene_path, allow_pickle=True)
+        print(f'data: {data}')
+
+        model_names_all = data["model_names"]
+        poses_all = data["poses"]  # [x, y, z, qx, qy, qz, q]
+
+        # Index into the requested scene (works for either multi-scene or single-scene)
+        model_names = model_names_all[scene_number] if model_names_all.ndim == 2 else model_names_all
+        poses = poses_all[scene_number] if poses_all.ndim == 3 else poses_all
+        
+        # extracts the end of each model name path so we can use it to match the obejct names in the .npz file
+        urdf_by_name = {p.stem: p for p in self.object_urdfs}
+        
+        # place objects
+        # spawned = []
+        for model_name, pose7 in zip(model_names, poses):
+            # Map model name -> urdf path
+            urdf = urdf_by_name[model_name]
+            
+            x_, y_, z, qx, qy, qz, qw = pose7
+            x = x_ + 0.15
+            y = y_ + 0.15
+            rot = Rotation.from_quat([qx, qy, qz, qw])  # scipy expects [x, y, z, w]
+
+            # Load at recorded pose
+            pose = Transform(rot, np.r_[x, y, z])
+            body = self.world.load_urdf(urdf, pose, scale=self.global_scaling * scale)
+
+            # Adjust z so it sits on the table (keep your existing behavior)
+            lower, upper = self.world.p.getAABB(body.uid)
+            z_on_table = table_height + 0.5 * (upper[2] - lower[2]) + 0.002
+            body.set_pose(pose=Transform(rot, np.r_[x, y, z_on_table]))
+
+            self.world.step()
+            self.wait_for_objects_to_rest(timeout=3.0)
+            # spawned.append(body)
+
+        self.wait_for_objects_to_rest(timeout=3.0)
+        self.save_poses_to_json()
+        # return spawned
+
+
     
     def save_poses_to_json(self, path="scene_poses.json"):
         """
@@ -290,91 +316,6 @@ class ClutterRemovalSim(object):
             # body.set_pose(pose=pose)
             self.world.step()
 
-
-    def acquire_tsdf(self, n, N=None, resolution=40):
-        """Render synthetic depth images from n viewpoints and integrate into a TSDF.
-
-        If N is None, the n viewpoints are equally distributed on circular trajectory.
-
-        If N is given, the first n viewpoints on a circular trajectory consisting of N points are rendered.
-        """
-        tsdf = TSDFVolume(self.size, resolution)
-        high_res_tsdf = TSDFVolume(self.size, 120)
-
-        if self.sideview:
-            origin = Transform(Rotation.identity(), np.r_[self.size / 2, self.size / 2, self.size / 3])
-            theta = np.pi / 3.0
-            # theta = np.pi / 100
-        else:
-            origin = Transform(Rotation.identity(), np.r_[self.size / 2, self.size / 2, 0])
-            theta = np.pi / 6.0
-        r = 2.0 * self.size
-
-        N = N if N else n
-        if self.sideview:
-            assert n == 1
-            # phi_list = [0.0]
-            phi_list = [- np.pi / 2.0]
-        else:
-            phi_list = 2.0 * np.pi * np.arange(n) / N
-        extrinsics = [camera_on_sphere(origin, r, theta, phi) for phi in phi_list]
-
-        # T_base_cam = extrinsics[0].inverse()
-        # camera_pose = T_base_cam.translation
-        # x_direction = T_base_cam.rotation.as_matrix()[:,0]
-        # y_direction = T_base_cam.rotation.as_matrix()[:,1]
-        # z_direction = T_base_cam.rotation.as_matrix()[:,2]
-
-
-        # self.world.p.removeAllUserDebugItems()
-        # x_end_p = (np.array(camera_pose) + np.array(x_direction*2)).tolist()
-        # x_line_id = self.world.p.addUserDebugLine(camera_pose,x_end_p,[1,0,0])# y 轴
-        # y_end_p = (np.array(camera_pose) + np.array(y_direction*2)).tolist()
-        # y_line_id = self.world.p.addUserDebugLine(camera_pose,y_end_p,[0,1,0])# z轴
-        # z_end_p = (np.array(camera_pose) + np.array(z_direction*2)).tolist()
-        # z_line_id = self.world.p.addUserDebugLine(camera_pose,z_end_p,[0,0,1])
-        timing = 0.0 # [x,y,z,qx,qy,qz,qw]: -0.15, 0.1616, 0.5200, -0.866, 0, 0, -0.5
-        for extrinsic in extrinsics:
-            depth_img = self.camera.render(extrinsic)[1]
-            # color_img, depth_img = self.camera.render(extrinsic)
-            # plt.imsave("color_packed.png", color_img)
-            # depth_img[depth_img>1.4] = 0.0
-  
-            # add noise 
-            depth_img = apply_noise(depth_img, self.add_noise)
-
-
-            # mask = np.zeros(depth_img.shape)
-            # mask[42:456, 223:747] = 1
-            # pcl = create_point_cloud_from_depth_image(depth_img, self.intrinsic, organized=True)
-            # pcl = pcl[mask.astype('bool')]
-            # cloud = o3d.geometry.PointCloud()
-            # cloud.points = o3d.utility.Vector3dVector(pcl.astype(np.float32))
-            # plt.imsave('depth_trans_blur.png',depth_img)
-            # depth_img = np.load("/home/pinhao/vgn/real_depth.npy")
-            # plt.imshow(depth_img)
-            # plt.show()
-            
-            # depth_img = apply_dex_noise(depth_img,
-            #     gamma_shape=1000,
-            #     gamma_scale=0.001,
-            #     gp_sigma=0.01,
-            #     gp_scale=4.0,
-            #     gp_rate=1.0)
-
-
-            # plt.imshow(depth_img)
-            # plt.show()
-            
-            tic = time.time()
-            tsdf.integrate(depth_img, self.camera.intrinsic, extrinsic)
-            timing += time.time() - tic
-            high_res_tsdf.integrate(depth_img, self.camera.intrinsic, extrinsic)
-        bounding_box = o3d.geometry.AxisAlignedBoundingBox(self.lower, self.upper)
-        pc = high_res_tsdf.get_cloud()
-        pc = pc.crop(bounding_box)
-
-        return tsdf, pc, timing
 
     def execute_grasp(self, grasp, remove=True, allow_contact=True):
         T_world_grasp = grasp.pose
@@ -457,48 +398,6 @@ class ClutterRemovalSim(object):
     def advance_sim(self,frames):
         for _ in range(frames):
             self.world.step()
-    """
-    def execute_grasp(self, grasp, remove=True, allow_contact=False):
-        T_world_grasp = grasp.pose
-        T_grasp_pregrasp = Transform(Rotation.identity(), [0.0, 0.0, -0.05])
-        T_world_pregrasp = T_world_grasp * T_grasp_pregrasp
-
-        approach = T_world_grasp.rotation.as_matrix()[:, 2]
-        angle = np.arccos(np.dot(approach, np.r_[0.0, 0.0, -1.0]))
-        if angle > np.pi / 3.0:
-            # side grasp, lift the object after establishing a grasp
-            T_grasp_pregrasp_world = Transform(Rotation.identity(), [0.0, 0.0, 0.1])
-            T_world_retreat = T_grasp_pregrasp_world * T_world_grasp
-        else:
-            T_grasp_retreat = Transform(Rotation.identity(), [0.0, 0.0, -0.1])
-            T_world_retreat = T_world_grasp * T_grasp_retreat
-
-        self.gripper.reset(T_world_pregrasp)
-
-        if self.gripper.detect_contact():
-            result = Label.FAILURE, self.gripper.max_opening_width
-        else:
-            self.gripper.move_tcp_xyz(T_world_grasp, abort_on_contact=True)
-            if self.gripper.detect_contact() and not allow_contact:
-                result = Label.FAILURE, self.gripper.max_opening_width
-            else:
-                self.gripper.move(0.0)
-                self.gripper.move_tcp_xyz(T_world_retreat, abort_on_contact=False)
-                if self.check_success(self.gripper):
-                    result = Label.SUCCESS, self.gripper.read()
-                    if remove:
-                        contacts = self.world.get_contacts(self.gripper.body)
-                        self.world.remove_body(contacts[0].bodyB)
-                else:
-                    result = Label.FAILURE, self.gripper.max_opening_width
-
-        self.world.remove_body(self.gripper.body)
-
-        if remove:
-            self.remove_and_wait()
-
-        return result
-    """
 
     def remove_and_wait(self):
         # wait for objects to rest while removing bodies that fell outside the workspace

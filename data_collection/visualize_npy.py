@@ -300,8 +300,21 @@ def main():
     )
 
     args = ap.parse_args()
+    scene_arg = Path(args.scene)
 
-    scene_dir = Path("../data") / args.scene
+    # Case 1: user passed an absolute or relative path directly
+    if scene_arg.exists():
+        scene_dir = scene_arg
+    # layout: ../data/<scene_name>
+    elif (Path("../data") / scene_arg).exists():
+        scene_dir = Path("../data") / scene_arg
+    # replica layout: ../data/replica/<scene_name>
+    elif (Path("../data/replica") / scene_arg).exists():
+        scene_dir = Path("../data/replica") / scene_arg
+
+    else:
+        raise FileNotFoundError(f"Could not resolve scene path from: {args.scene}")
+
     npz_path = next(scene_dir.glob("*.npz"))  
 
     print(f"Using bundle: {npz_path}")

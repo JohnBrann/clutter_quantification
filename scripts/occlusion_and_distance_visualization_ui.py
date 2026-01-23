@@ -1,21 +1,3 @@
-#!/usr/bin/env python3
-"""
-interactive_occlusion_and_2d_grid.py
-
-Interactive occlusion grid viewer that shows:
-  - left: occlusion/scene image for hovered viewpoint
-  - right: corresponding 2D distance visualization (masked/distances_viz.png)
-  - text on the 2D panel: total connections, blocked connections, gripper width threshold,
-    and segment counts (before/after/excluded) read from connections_summary.csv
-
-Usage:
-  python interactive_occlusion_and_2d_grid.py \
-    --csv ./scene01_out/occlusion_summary.csv \
-    --scene-dir scene01/scene/ \
-    --distances-dir scene01_out/ \
-    --connections-summary scene01_out/connections_summary.csv \
-    --gripper-width 32.0
-"""
 import argparse
 import csv
 import os

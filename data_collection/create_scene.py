@@ -318,47 +318,6 @@ def render_object_solo(sim, T, target_uid, all_body_uids, saved_poses):
     
     return mask, uid_mask, depth_solo
 
-# ----------------------------
-# Visual tour helper
-# ----------------------------
-def preview_viewpoints(sim, extrinsics, theta_phi_pairs, center, delay=1.0):
-    """
-    Visual tour of all camera viewpoints before capturing data.
-    Moves the GUI camera to each position with a brief pause.
-    Does not render or capture anything - purely for visual inspection.
-    
-    Args:
-        sim: ClutterRemovalSim instance
-        extrinsics: list of Transform objects for camera poses
-        theta_phi_pairs: list of (theta_deg, phi_deg) tuples
-        center: np.array of scene center position
-        delay: seconds to pause at each viewpoint
-    """
-    if not sim.gui:
-        print("[preview] Skipping viewpoint preview (GUI not enabled)")
-        return
-    
-    print(f"\n[preview] Starting viewpoint tour of {len(extrinsics)} positions...")
-    print("[preview] Press Ctrl+C to skip the tour\n")
-    
-    try:
-        for i, (T, (th_deg, ph_deg)) in enumerate(zip(extrinsics, theta_phi_pairs)):
-            # Get spherical coordinates for GUI camera
-            r, theta, phi, _, _ = extrinsics_to_spherical(T, center)
-            
-            # Move GUI camera to this viewpoint
-            set_gui_camera_from_sphere(sim, r, theta, phi)
-            
-            print(f"[preview] Viewpoint {i+1}/{len(extrinsics)}: "
-                  f"theta={th_deg}°, phi={ph_deg}°")
-            
-            # Brief pause to see the view
-            time.sleep(delay)
-            
-    except KeyboardInterrupt:
-        print("\n[preview] Tour skipped by user")
-    
-    print("[preview] Tour complete. Starting data capture...\n")
 
 # ----------------------------
 # Main (per-viewpoint ordering; viewpoints from in-code list only)
@@ -366,7 +325,7 @@ def preview_viewpoints(sim, extrinsics, theta_phi_pairs, center, delay=1.0):
 def main():
     parser = argparse.ArgumentParser()
     # parser.add_argument("--root", type=Path, default=Path("labeled_data"))
-    parser.add_argument("--scene", type=str, choices=["pile", "packed"], default="pile")
+    parser.add_argument("--scene", type=str, choices=["pile", "packed", "replica"], default="pile")
     parser.add_argument("--object-set", type=str, default="blocks")
     parser.add_argument("--sim-gui", action="store_true")
     parser.add_argument("--delay", type=float, default=0.0,
@@ -375,20 +334,22 @@ def main():
                         help="Idle after the tour so the GUI stays open.")
     parser.add_argument("--remove-box", action="store_true",
                         help="remove the box from the scene or not")
+    parser.add_argument(
+        "--replica-scene-id",type=str,
+        default="",help="Scene key from replica JSON (e.g. scene_1)")
 
     args = parser.parse_args()
 
     dataset_name = Path(args.object_set).name
 
-    out_dir = Path("../data") / dataset_name
-
-    # Ensure metadata dir exists (write_setup writes here)
-    # (args.root / "mesh_pose_list").mkdir(parents=True, exist_ok=True)
-
+    if args.scene == "replica":
+        out_dir = Path("../data") / "replica" / args.replica_scene_id
+    else:
+        out_dir = Path("../data") / dataset_name
 
 
     np.random.seed()
-    sim = ClutterRemovalSim(args.scene, args.object_set, gui=args.sim_gui, remove_box=args.remove_box)
+    sim = ClutterRemovalSim(args.scene, args.object_set, gui=args.sim_gui, remove_box=args.remove_box, replica_scene_id=args.replica_scene_id)
 
     # Output root + setup metadata
     (out_dir).mkdir(parents=True, exist_ok=True)
@@ -408,7 +369,6 @@ def main():
     extrinsics, theta_phi_pairs = build_extrinsics(sim)
 
     center = np.array([sim.size/2, sim.size/2, sim.size/3])
-    # preview_viewpoints(sim, extrinsics, theta_phi_pairs, center, delay=0.5)
 
     # Discover bodies/objects once (constant for the scene)
     bodies, obj_uids = discover_scene_bodies_verbose(sim.world)
